@@ -118,9 +118,9 @@ def _height_to_label(height: int) -> str:
         return "Unknown"
     if height in QUALITY_LABELS:
         return QUALITY_LABELS[height]
-    # Within 5% of a standard tier
+    # Within 12% of a standard tier (handles 652→720p, 576→540p, 270→240p, etc.)
     for qh in QUALITY_HEIGHTS:
-        if abs(height - qh) / qh <= 0.05:
+        if abs(height - qh) / qh <= 0.12:
             return QUALITY_LABELS[qh]
     return f"{height}p"
 
@@ -182,13 +182,13 @@ def parse_formats(raw_formats: list) -> list:
         and f.get("acodec") not in ("none", None)
         and f.get("height")
     ]
-    # muxed progressive: both codecs=None but has height+bitrate (X/Twitter http-*)
+    # muxed progressive: both codecs=None but has height (X/Twitter http-*, Instagram fmt 8)
+    # Note: tbr may be None for some pre-muxed streams (e.g., Instagram format "8")
     combined_muxed = [
         f for f in raw_formats
         if f.get("vcodec") is None
         and f.get("acodec") is None
         and f.get("height")
-        and (f.get("tbr") or f.get("vbr") or 0) > 0
     ]
     combined = combined_explicit + combined_muxed
 

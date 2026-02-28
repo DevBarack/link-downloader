@@ -64,13 +64,15 @@ export default function DownloadButton({
 
       const contentLength = res.headers.get('Content-Length')
       const total = contentLength ? parseInt(contentLength) : null
+      const mimeType = res.headers.get('Content-Type') || 'application/octet-stream'
       let loaded = 0
 
-      // Stream with progress tracking
+      let blob: Blob
       const reader = res.body?.getReader()
-      const chunks: Uint8Array[] = []
 
       if (reader) {
+        // Streaming path — tracks progress
+        const chunks: Uint8Array[] = []
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -79,9 +81,12 @@ export default function DownloadButton({
           if (total) onProgress(Math.round((loaded / total) * 100))
           else onProgress(-1) // indeterminate
         }
+        blob = new Blob(chunks, { type: mimeType })
+      } else {
+        // Fallback for browsers without ReadableStream body support
+        onProgress(-1)
+        blob = await res.blob()
       }
-
-      const blob = new Blob(chunks, { type: res.headers.get('Content-Type') || 'application/octet-stream' })
       const href = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = href
