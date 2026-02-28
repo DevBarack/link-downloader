@@ -1,13 +1,19 @@
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
+// Render's fromService gives a bare hostname; prepend https:// if needed
+function getApiUrl() {
+  const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  return raw.startsWith('http') ? raw : `https://${raw}`
+}
+
 // GET /api/download?url=...&format_id=...
 // Used by <a href> for direct file downloads — browser streams natively, no RAM buffering.
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const url = searchParams.get('url') || ''
   const format_id = searchParams.get('format_id') || 'direct'
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const apiUrl = getApiUrl()
 
   const backendUrl = new URL(`${apiUrl}/api/download`)
   backendUrl.searchParams.set('url', url)
@@ -31,7 +37,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const apiUrl = getApiUrl()
 
   const res = await fetch(`${apiUrl}/api/download`, {
     method: 'POST',

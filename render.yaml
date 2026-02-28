@@ -22,6 +22,6 @@ services:
         fromService:
           name: linkdrop-backend
           type: web
-          property: url    # full https:// URL, not just hostname
+          property: host
       - key: NODE_VERSION
         value: 20

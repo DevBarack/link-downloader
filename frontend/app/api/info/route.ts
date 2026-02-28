@@ -1,9 +1,15 @@
 export const runtime = 'nodejs'
 export const maxDuration = 45
 
+// Render's fromService gives a bare hostname; prepend https:// if needed
+function getApiUrl() {
+  const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  return raw.startsWith('http') ? raw : `https://${raw}`
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const apiUrl = getApiUrl()
 
   const res = await fetch(`${apiUrl}/api/info`, {
     method: 'POST',
