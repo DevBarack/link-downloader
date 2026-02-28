@@ -8,7 +8,7 @@ services:
       - key: PORT
         value: 8000
       - key: COOKIES_BROWSER
-        value: ""          # No browser available in Docker on Render
+        value: ""
 
   - type: web
     name: linkdrop-frontend
