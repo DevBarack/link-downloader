@@ -68,74 +68,41 @@ def detect_platform(url: str) -> str:
     return "direct"
 
 
-def parse_formats(info: dict) -> list:
+# Fixed quality tiers shown to user — yt-dlp falls back to best available if tier not in video
+QUALITY_TIERS = [
+    {"height": 2160, "label": "4K",    "ext": "mp4"},
+    {"height": 1440, "label": "1440p", "ext": "mp4"},
+    {"height": 1080, "label": "1080p", "ext": "mp4"},
+    {"height": 720,  "label": "720p",  "ext": "mp4"},
+    {"height": 480,  "label": "480p",  "ext": "mp4"},
+    {"height": 360,  "label": "360p",  "ext": "mp4"},
+]
+
+
+def make_video_formats() -> list:
+    """Return all quality tiers as yt-dlp format selector strings."""
     formats = []
-    seen_qualities = set()
-
-    raw_formats = info.get("formats", [])
-    # Filter video+audio combined or video-only, sort by height desc
-    video_formats = [
-        f for f in raw_formats
-        if f.get("vcodec") != "none" and f.get("ext") in ("mp4", "webm", "mkv")
-    ]
-    video_formats.sort(key=lambda f: (f.get("height") or 0), reverse=True)
-
-    for f in video_formats:
-        height = f.get("height")
-        if not height:
-            continue
-        quality = f"{height}p"
-        if quality in seen_qualities:
-            continue
-        seen_qualities.add(quality)
-
-        # Prefer merged format (video+audio) — use format string with audio
-        fmt_id = f.get("format_id", "")
-        # Check if this format has audio
-        has_audio = f.get("acodec") not in ("none", None)
-        if not has_audio:
-            # Find best audio and merge
-            audio_formats = [
-                af for af in raw_formats
-                if af.get("vcodec") == "none" and af.get("acodec") != "none"
-            ]
-            if audio_formats:
-                best_audio = max(audio_formats, key=lambda af: af.get("abr") or 0)
-                fmt_id = f"{fmt_id}+{best_audio['format_id']}"
-
+    for tier in QUALITY_TIERS:
+        h = tier["height"]
+        # Try mp4 first, then any container, fall back to best available at or below this height
+        fmt_str = (
+            f"bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={h}]+bestaudio"
+            f"/best[height<={h}]"
+        )
         formats.append({
-            "id": fmt_id,
+            "id": fmt_str,
             "ext": "mp4",
-            "quality": quality,
-            "filesize": f.get("filesize") or f.get("filesize_approx"),
-        })
-
-        if len(formats) >= 4:
-            break
-
-    # Add audio-only option
-    audio_formats = [
-        f for f in raw_formats
-        if f.get("vcodec") == "none" and f.get("acodec") != "none"
-    ]
-    if audio_formats:
-        best_audio = max(audio_formats, key=lambda f: f.get("abr") or 0)
-        formats.append({
-            "id": f"bestaudio",
-            "ext": "mp3",
-            "quality": "Audio only",
-            "filesize": best_audio.get("filesize") or best_audio.get("filesize_approx"),
-        })
-
-    # Fallback: just best
-    if not formats:
-        formats.append({
-            "id": "best",
-            "ext": "mp4",
-            "quality": "Best",
+            "quality": tier["label"],
             "filesize": None,
         })
-
+    # Audio only
+    formats.append({
+        "id": "bestaudio",
+        "ext": "mp3",
+        "quality": "Audio only",
+        "filesize": None,
+    })
     return formats
 
 
@@ -149,14 +116,13 @@ async def get_info(req: InfoRequest):
     url = req.url.strip()
     platform = detect_platform(url)
 
-    # Try yt-dlp first
+    # Try yt-dlp first (no extractor-args here — just need metadata, not a stream)
     try:
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
             "--dump-json",
             "--no-playlist",
             "--no-warnings",
-            "--extractor-args", "youtube:player_client=android,web_creator",
             url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -169,14 +135,13 @@ async def get_info(req: InfoRequest):
             # Generic extractor = direct file URL — skip to httpx fallback for clean metadata
             if extractor == "Generic":
                 raise ValueError("generic extractor")
-            formats = parse_formats(info)
             return {
                 "title": info.get("title", "Untitled"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
                 "platform": platform if platform != "direct" else extractor.lower(),
                 "is_direct": False,
-                "formats": formats,
+                "formats": make_video_formats(),
                 "uploader": info.get("uploader") or info.get("channel"),
                 "view_count": info.get("view_count"),
             }
@@ -249,10 +214,11 @@ async def download(req: DownloadRequest):
             "--merge-output-format", "mp4",
         ]
 
-        if format_id and format_id not in ("best", "bestaudio"):
+        if format_id == "bestaudio":
+            cmd.extend(["-f", "bestaudio/best", "--extract-audio", "--audio-format", "mp3"])
+        elif format_id:
+            # format_id is a full yt-dlp format selector string (e.g. "bestvideo[height<=1080]...")
             cmd.extend(["-f", format_id])
-        elif format_id == "bestaudio":
-            cmd.extend(["-f", "bestaudio", "--extract-audio", "--audio-format", "mp3"])
         else:
             cmd.extend(["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"])
 
