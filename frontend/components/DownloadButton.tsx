@@ -39,6 +39,21 @@ export default function DownloadButton({
     const body = { url, format_id: format.id }
     const outputFilename = sanitizeFilename(filename, format.ext)
 
+    // Direct file downloads: use GET endpoint + <a href> so the browser
+    // streams natively without buffering the whole file in RAM first.
+    if (format.id === 'direct') {
+      const params = new URLSearchParams({ url, format_id: 'direct' })
+      const a = document.createElement('a')
+      a.href = `/api/download?${params}`
+      a.download = outputFilename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      onProgress(100)
+      onComplete(outputFilename)
+      return
+    }
+
     if (isPWA) {
       // PWA mode: open direct backend URL in Safari tab
       const params = new URLSearchParams({ url, format_id: format.id })

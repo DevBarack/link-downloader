@@ -412,6 +412,12 @@ async def get_info(req: InfoRequest):
         raise HTTPException(status_code=400, detail=f"Could not fetch URL info: {str(e)}")
 
 
+@app.get("/api/download")
+async def download_get(url: str, format_id: str = "direct"):
+    """GET alias — used by browser <a href> for direct file downloads."""
+    return await download(DownloadRequest(url=url, format_id=format_id))
+
+
 @app.post("/api/download")
 async def download(req: DownloadRequest):
     url = req.url.strip()
@@ -420,18 +426,32 @@ async def download(req: DownloadRequest):
 
     # ── Direct file download (httpx streaming) ─────────────────────────────────
     if format_id == "direct":
+        filename = url.split("?")[0].split("/")[-1] or "file"
+
+        # HEAD first to get Content-Length and real Content-Type
+        content_length = None
+        media_type = "application/octet-stream"
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=8) as hc:
+                head = await hc.head(url)
+                content_length = head.headers.get("content-length")
+                ct = head.headers.get("content-type", "").split(";")[0].strip()
+                if ct:
+                    media_type = ct
+        except Exception:
+            pass
+
         async def stream_direct():
             async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
                 async with client.stream("GET", url) as response:
                     async for chunk in response.aiter_bytes(chunk_size=65536):
                         yield chunk
 
-        filename = url.split("?")[0].split("/")[-1] or "file"
-        return StreamingResponse(
-            stream_direct(),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": content_disposition(filename)},
-        )
+        headers: dict[str, str] = {"Content-Disposition": content_disposition(filename)}
+        if content_length:
+            headers["Content-Length"] = content_length
+
+        return StreamingResponse(stream_direct(), media_type=media_type, headers=headers)
 
     # ── yt-dlp download ────────────────────────────────────────────────────────
     tmp_dir = Path(f"/tmp/{uuid.uuid4()}")
