@@ -26,7 +26,6 @@ export default function DownloadButton({
   onProgress, onComplete, onError, onStart,
 }: Props) {
   const [downloadUrl, setDownloadUrl] = useState('')
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   const handleDownload = async () => {
     if (!format) return
@@ -36,40 +35,29 @@ export default function DownloadButton({
     const isPWA = typeof window !== 'undefined' &&
       window.matchMedia('(display-mode: standalone)').matches
 
-    const body = { url, format_id: format.id }
     const outputFilename = sanitizeFilename(filename, format.ext)
 
-    // Direct file downloads: use GET endpoint + <a href> so the browser
-    // streams natively without buffering the whole file in RAM first.
-    if (format.id === 'direct') {
-      const params = new URLSearchParams({ url, format_id: 'direct' })
-      const a = document.createElement('a')
-      a.href = `/api/download?${params}`
-      a.download = outputFilename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+
+    // Use /dl rewrite which proxies to backend at HTTP level (no App Router).
+    // Safari gets clean Content-Disposition + Content-Type from FastAPI directly.
+    if (isIOS || isPWA || format.id === 'direct') {
+      const params = new URLSearchParams({ url, format_id: format.id })
+      const link = `/dl?${params}`
+      setDownloadUrl(link)
+      window.location.href = link
       onProgress(100)
       onComplete(outputFilename)
       return
     }
 
-    if (isPWA) {
-      // PWA mode: open direct backend URL in Safari tab
-      const params = new URLSearchParams({ url, format_id: format.id })
-      const directUrl = `${API_URL}/api/download?${params}`
-      setDownloadUrl(directUrl)
-      window.open(`/api/download-redirect?${params}`, '_blank')
-      onComplete(outputFilename)
-      return
-    }
-
-    // Browser mode: fetch → streaming blob → <a download>
+    // Desktop browser mode: fetch → streaming blob → <a download>
     try {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ url, format_id: format.id }),
       })
 
       if (!res.ok) {

@@ -72,6 +72,59 @@ class DownloadRequest(BaseModel):
     format_id: Optional[str] = None
 
 
+async def resolve_real_url(url: str) -> str:
+    """
+    Some sites (e.g. videy.co) serve an HTML page at what looks like a direct
+    media URL. The page loads the real file from a CDN subdomain via JS.
+    Detect this and return the actual media URL.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+            # Use GET with a small range to check Content-Type
+            head = await client.head(url)
+            ct = head.headers.get("content-type", "").split(";")[0].strip().lower()
+
+            if ct.startswith("text/html"):
+                # URL looks like media but returned HTML — try CDN pattern.
+                # Common pattern: interstitial.domain.com/file → cdn.domain.com/file
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                parts = parsed.hostname.split(".")
+
+                # Try replacing first subdomain with "cdn"
+                if len(parts) >= 2:
+                    base_domain = ".".join(parts[-2:]) if len(parts) >= 2 else parsed.hostname
+                    cdn_url = f"{parsed.scheme}://cdn.{base_domain}{parsed.path}"
+                    if parsed.query:
+                        cdn_url += f"?{parsed.query}"
+
+                    # Verify the CDN URL returns actual media
+                    try:
+                        cdn_head = await client.head(cdn_url)
+                        cdn_ct = cdn_head.headers.get("content-type", "").split(";")[0].strip().lower()
+                        if not cdn_ct.startswith("text/html"):
+                            return cdn_url
+                    except Exception:
+                        pass
+
+                # Also try stripping subdomain entirely
+                if len(parts) >= 3:
+                    bare_url = f"{parsed.scheme}://{base_domain}{parsed.path}"
+                    if parsed.query:
+                        bare_url += f"?{parsed.query}"
+                    try:
+                        bare_head = await client.head(bare_url)
+                        bare_ct = bare_head.headers.get("content-type", "").split(";")[0].strip().lower()
+                        if not bare_ct.startswith("text/html"):
+                            return bare_url
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    return url
+
+
 def content_disposition(filename: str) -> str:
     """RFC 5987 safe Content-Disposition header (supports non-ASCII filenames)."""
     ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "download"
@@ -386,11 +439,14 @@ async def get_info(req: InfoRequest):
 
     # 3) Fallback: treat as direct file (mp4, pdf, jpg, etc.)
     try:
+        # Resolve HTML interstitial pages to actual media URLs
+        resolved = await resolve_real_url(url)
+
         async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-            head = await client.head(url)
+            head = await client.head(resolved)
             content_type = head.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
             content_length = head.headers.get("content-length")
-            filename = url.split("?")[0].split("/")[-1] or "file"
+            filename = resolved.split("?")[0].split("/")[-1] or "file"
             ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else content_type.split("/")[-1]
 
             return {
@@ -399,6 +455,7 @@ async def get_info(req: InfoRequest):
                 "duration": None,
                 "platform": "direct",
                 "is_direct": True,
+                "direct_url": resolved,
                 "formats": [{
                     "id": "direct",
                     "ext": ext,
@@ -426,14 +483,16 @@ async def download(req: DownloadRequest):
 
     # ── Direct file download (httpx streaming) ─────────────────────────────────
     if format_id == "direct":
-        filename = url.split("?")[0].split("/")[-1] or "file"
+        # Resolve HTML interstitial pages to actual media URLs
+        resolved = await resolve_real_url(url)
+        filename = resolved.split("?")[0].split("/")[-1] or "file"
 
         # HEAD first to get Content-Length and real Content-Type
         content_length = None
         media_type = "application/octet-stream"
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=8) as hc:
-                head = await hc.head(url)
+                head = await hc.head(resolved)
                 content_length = head.headers.get("content-length")
                 ct = head.headers.get("content-type", "").split(";")[0].strip()
                 if ct:
@@ -443,7 +502,7 @@ async def download(req: DownloadRequest):
 
         async def stream_direct():
             async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
-                async with client.stream("GET", url) as response:
+                async with client.stream("GET", resolved) as response:
                     async for chunk in response.aiter_bytes(chunk_size=65536):
                         yield chunk
 
