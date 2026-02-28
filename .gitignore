@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/.env*.local
+
+# Environment
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+/tmp/
+
+# Icons source SVGs (PNGs are committed)
+frontend/public/icons/*.svg
