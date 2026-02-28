@@ -7,6 +7,8 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      - key: COOKIES_BROWSER
+        value: ""          # No browser available in Docker on Render
 
   - type: web
     name: linkdrop-frontend
@@ -20,6 +22,6 @@ services:
         fromService:
           name: linkdrop-backend
           type: web
-          property: host
+          property: url    # full https:// URL, not just hostname
       - key: NODE_VERSION
         value: 20
