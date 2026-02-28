@@ -36,6 +36,14 @@ class DownloadRequest(BaseModel):
     format_id: Optional[str] = None
 
 
+def content_disposition(filename: str) -> str:
+    """Return a Content-Disposition header value safe for non-ASCII filenames (RFC 5987)."""
+    from urllib.parse import quote
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "download"
+    utf8_name = quote(filename, safe=" .-_")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+
+
 PLATFORM_PATTERNS = {
     "youtube": ["youtube.com", "youtu.be"],
     "tiktok": ["tiktok.com"],
@@ -224,7 +232,7 @@ async def download(req: DownloadRequest):
         return StreamingResponse(
             stream_direct(),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": content_disposition(filename)},
         )
 
     # yt-dlp download
@@ -295,7 +303,7 @@ async def download(req: DownloadRequest):
             file_stream(),
             media_type=content_type,
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": content_disposition(filename),
                 "Content-Length": str(file_size),
             },
         )
